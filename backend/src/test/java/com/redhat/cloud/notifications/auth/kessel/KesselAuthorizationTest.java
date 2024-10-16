@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import static com.redhat.cloud.notifications.TestConstants.DEFAULT_USER;
+
 @QuarkusTest
 public class KesselAuthorizationTest {
     @InjectMock
@@ -51,15 +53,7 @@ public class KesselAuthorizationTest {
     @Test
     void testAuthorized() {
         // Mock the security context.
-        final SecurityContext mockedSecurityContext = Mockito.mock(SecurityContext.class);
-
-        // Create a RhIdentity principal and assign it to the mocked security
-        // context.
-        final RhIdentity identity = Mockito.mock(RhIdentity.class);
-        Mockito.when(identity.getName()).thenReturn("Red Hat user");
-
-        final ConsolePrincipal<?> principal = new RhIdPrincipal(identity);
-        Mockito.when(mockedSecurityContext.getUserPrincipal()).thenReturn(principal);
+        final SecurityContext mockedSecurityContext = this.mockSecurityContext();
 
         // Enable the Kessel back end integration for this test.
         Mockito.when(this.backendConfig.isKesselRelationsEnabled()).thenReturn(true);
@@ -87,15 +81,7 @@ public class KesselAuthorizationTest {
     @Test
     void testUnauthorized() {
         // Mock the security context.
-        final SecurityContext mockedSecurityContext = Mockito.mock(SecurityContext.class);
-
-        // Create a RhIdentity principal and assign it to the mocked security
-        // context.
-        final RhIdentity identity = Mockito.mock(RhIdentity.class);
-        Mockito.when(identity.getName()).thenReturn("Red Hat user");
-
-        final ConsolePrincipal<?> principal = new RhIdPrincipal(identity);
-        Mockito.when(mockedSecurityContext.getUserPrincipal()).thenReturn(principal);
+        final SecurityContext mockedSecurityContext = this.mockSecurityContext();
 
         // Enable the Kessel back end integration for this test.
         Mockito.when(this.backendConfig.isKesselRelationsEnabled()).thenReturn(true);
@@ -128,15 +114,7 @@ public class KesselAuthorizationTest {
     @Test
     void testLookupAuthorizedIntegrations() {
         // Mock the security context.
-        final SecurityContext mockedSecurityContext = Mockito.mock(SecurityContext.class);
-
-        // Create a RhIdentity principal and assign it to the mocked security
-        // context.
-        final RhIdentity identity = Mockito.mock(RhIdentity.class);
-        Mockito.when(identity.getName()).thenReturn("Red Hat user");
-
-        final ConsolePrincipal<?> principal = new RhIdPrincipal(identity);
-        Mockito.when(mockedSecurityContext.getUserPrincipal()).thenReturn(principal);
+        final SecurityContext mockedSecurityContext = this.mockSecurityContext();
 
         // Enable the Kessel back end integration for this test.
         Mockito.when(this.backendConfig.isKesselRelationsEnabled()).thenReturn(true);
@@ -266,5 +244,25 @@ public class KesselAuthorizationTest {
 
             Assertions.assertEquals(ResourceType.INTEGRATION.getKesselObjectType(), lookupResourcesRequest.getResourceType(), String.format("unexpected resource type obtained on test case: %s", tc));
         }
+    }
+
+    /**
+     * Mocks a {@link SecurityContext} with a {@link RhIdentity} identity
+     * principal inside of it. The username used for the principal is the
+     * {@link com.redhat.cloud.notifications.TestConstants#DEFAULT_USER}
+     * @return the built security context.
+     */
+    private SecurityContext mockSecurityContext() {
+        final SecurityContext mockedSecurityContext = Mockito.mock(SecurityContext.class);
+
+        // Create a RhIdentity principal and assign it to the mocked security
+        // context.
+        final RhIdentity identity = Mockito.mock(RhIdentity.class);
+        Mockito.when(identity.getName()).thenReturn(DEFAULT_USER);
+
+        final ConsolePrincipal<?> principal = new RhIdPrincipal(identity);
+        Mockito.when(mockedSecurityContext.getUserPrincipal()).thenReturn(principal);
+
+        return mockedSecurityContext;
     }
 }
