@@ -9,10 +9,13 @@ import com.redhat.cloud.notifications.auth.principal.rhid.RhIdentity;
 import com.redhat.cloud.notifications.auth.principal.rhid.RhServiceAccountIdentity;
 import com.redhat.cloud.notifications.auth.principal.rhid.RhUserIdentity;
 import com.redhat.cloud.notifications.config.BackendConfig;
+import com.redhat.cloud.notifications.db.repositories.EndpointRepository;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.vertx.core.json.JsonObject;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.SecurityContext;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +33,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import static com.redhat.cloud.notifications.TestConstants.DEFAULT_ORG_ID;
 import static com.redhat.cloud.notifications.TestConstants.DEFAULT_USER;
 import static com.redhat.cloud.notifications.auth.kessel.Constants.WORKSPACE_ID_PLACEHOLDER;
 
@@ -40,6 +44,9 @@ public class KesselAuthorizationTest {
 
     @InjectMock
     CheckClient checkClient;
+
+    @InjectMock
+    EndpointRepository endpointRepository;
 
     @InjectMock
     LookupClient lookupClient;
@@ -134,6 +141,111 @@ public class KesselAuthorizationTest {
         final Set<UUID> expectedUuids = Set.of(firstUuid, secondUuid, thirdUuid);
 
         result.forEach(r -> Assertions.assertTrue(expectedUuids.contains(r), String.format("UUID \"%s\" not present in the expected UUIDs", r)));
+    }
+
+    /**
+     * Test that when the principal is authorized to perform the action, and
+     * that the integration exists, then no exception gets thrown.
+     */
+    @Test
+    void testPrincipalIsAuthorizedAndIntegrationExists() {
+        // Mock the security context.
+        final SecurityContext mockedSecurityContext = this.mockSecurityContext();
+
+        // Simulate that Kessel returns a positive response.
+        final UUID integrationId = UUID.randomUUID();
+        this.kesselTestHelper.mockKesselPermission(DEFAULT_USER, IntegrationPermission.VIEW, ResourceType.INTEGRATION, integrationId.toString());
+
+        // Call the function under test
+        this.kesselAuthorization.isPrincipalAuthorizedAndDoesIntegrationExist(mockedSecurityContext, IntegrationPermission.VIEW, integrationId);
+    }
+
+    /**
+     * Tests that when the principal is unauthorized but when the integration
+     * exists, a {@link ForbiddenException} is thrown.
+     */
+    @Test
+    void testPrincipalIsUnauthorizedAndIntegrationExists() {
+        // Mock the security context.
+        final SecurityContext mockedSecurityContext = this.mockSecurityContext();
+
+        // Simulate that Kessel returns a negative response.
+        final UUID integrationId = UUID.randomUUID();
+        this.kesselTestHelper.mockKesselPermission(DEFAULT_USER, IntegrationPermission.VIEW, ResourceType.INTEGRATION, integrationId.toString(), CheckResponse.Allowed.ALLOWED_FALSE);
+
+        // Simulate that the integration exists.
+        Mockito.when(this.endpointRepository.existsByUuidAndOrgId(integrationId, DEFAULT_ORG_ID)).thenReturn(true);
+
+        // Call the function under test.
+        Assertions.assertThrows(
+            ForbiddenException.class,
+            () -> this.kesselAuthorization.isPrincipalAuthorizedAndDoesIntegrationExist(mockedSecurityContext, IntegrationPermission.VIEW, integrationId)
+        );
+    }
+
+    /**
+     * Tests that when the principal is unauthorized, the integration does
+     * not exist, and the principal does not have the workspace permission, a
+     * {@link ForbiddenException} is thrown.
+     */
+    @Test
+    void testPrincipalIsUnauthorizedAndIntegrationNotExistsAndNotWorkspacePermission() {
+        // Mock the security context.
+        final SecurityContext mockedSecurityContext = this.mockSecurityContext();
+
+        // Simulate that Kessel returns a negative response.
+        final UUID integrationId = UUID.randomUUID();
+        this.kesselTestHelper.mockKesselPermission(DEFAULT_USER, IntegrationPermission.VIEW, ResourceType.INTEGRATION, integrationId.toString(), CheckResponse.Allowed.ALLOWED_FALSE);
+
+        // Simulate that the integration does not exist.
+        Mockito.when(this.endpointRepository.existsByUuidAndOrgId(integrationId, DEFAULT_ORG_ID)).thenReturn(false);
+
+        // Simulate that Kessel returns a negative response for the workspace
+        // permission.
+        this.kesselTestHelper.mockKesselPermission(DEFAULT_USER, WorkspacePermission.INTEGRATIONS_VIEW, ResourceType.WORKSPACE, WORKSPACE_ID_PLACEHOLDER, CheckResponse.Allowed.ALLOWED_FALSE);
+
+        // Call the function under test.
+        Assertions.assertThrows(
+            ForbiddenException.class,
+            () -> this.kesselAuthorization.isPrincipalAuthorizedAndDoesIntegrationExist(mockedSecurityContext, IntegrationPermission.VIEW, integrationId)
+        );
+    }
+
+    /**
+     * Tests that when the principal is unauthorized, the integration does
+     * not exist, and the principal has the workspace permission, a
+     * {@link jakarta.ws.rs.NotFoundException} is thrown.
+     */
+    @Test
+    void testPrincipalIsUnauthorizedAndIntegrationNotExistsAndWorkspacePermission() {
+        // Mock the security context.
+        final SecurityContext mockedSecurityContext = this.mockSecurityContext();
+
+        // Enable the Kessel back end integration for this test.
+        Mockito.when(this.backendConfig.isKesselRelationsEnabled()).thenReturn(true);
+
+        // Simulate that Kessel returns a negative response.
+        final UUID integrationId = UUID.randomUUID();
+        this.kesselTestHelper.mockKesselPermission(DEFAULT_USER, IntegrationPermission.VIEW, ResourceType.INTEGRATION, integrationId.toString(), CheckResponse.Allowed.ALLOWED_FALSE);
+
+        // Simulate that the integration does not exist.
+        Mockito.when(this.endpointRepository.existsByUuidAndOrgId(integrationId, DEFAULT_ORG_ID)).thenReturn(false);
+
+        // Simulate that Kessel returns a positive response for the workspace
+        // permission.
+        this.kesselTestHelper.mockKesselPermission(DEFAULT_USER, WorkspacePermission.INTEGRATIONS_VIEW, ResourceType.WORKSPACE, WORKSPACE_ID_PLACEHOLDER);
+
+        // Call the function under test.
+        final NotFoundException e = Assertions.assertThrows(
+            NotFoundException.class,
+            () -> this.kesselAuthorization.isPrincipalAuthorizedAndDoesIntegrationExist(mockedSecurityContext, IntegrationPermission.VIEW, integrationId)
+        );
+
+        // Assert that the exception message is the expected one.
+        final JsonObject expectedPayload = new JsonObject();
+        expectedPayload.put("error", "Integration not found");
+
+        Assertions.assertEquals(expectedPayload.encode(), e.getMessage(), "unexpected exception message received");
     }
 
     /**
@@ -249,6 +361,7 @@ public class KesselAuthorizationTest {
         // context.
         final RhIdentity identity = Mockito.mock(RhIdentity.class);
         Mockito.when(identity.getName()).thenReturn(DEFAULT_USER);
+        Mockito.when(identity.getOrgId()).thenReturn(DEFAULT_ORG_ID);
 
         final ConsolePrincipal<?> principal = new RhIdPrincipal(identity);
         Mockito.when(mockedSecurityContext.getUserPrincipal()).thenReturn(principal);
