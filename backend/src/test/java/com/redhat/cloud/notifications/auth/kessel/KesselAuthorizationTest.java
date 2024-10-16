@@ -15,12 +15,12 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.core.SecurityContext;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.project_kessel.api.relations.v1beta1.CheckRequest;
 import org.project_kessel.api.relations.v1beta1.CheckResponse;
 import org.project_kessel.api.relations.v1beta1.LookupResourcesRequest;
-import org.project_kessel.api.relations.v1beta1.LookupResourcesResponse;
 import org.project_kessel.api.relations.v1beta1.ObjectReference;
 import org.project_kessel.api.relations.v1beta1.SubjectReference;
 import org.project_kessel.relations.client.CheckClient;
@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static com.redhat.cloud.notifications.TestConstants.DEFAULT_USER;
+import static com.redhat.cloud.notifications.auth.kessel.Constants.WORKSPACE_ID_PLACEHOLDER;
 
 @QuarkusTest
 public class KesselAuthorizationTest {
@@ -46,6 +47,17 @@ public class KesselAuthorizationTest {
     @Inject
     KesselAuthorization kesselAuthorization;
 
+    @Inject
+    KesselTestHelper kesselTestHelper;
+
+    /**
+     * Enable the Kessel's Relations back end for every test.
+     */
+    @BeforeEach
+    public void enableKesselRelations() {
+        Mockito.when(this.backendConfig.isKesselRelationsEnabled()).thenReturn(true);
+    }
+
     /**
      * Tests that when the principal is authorized, the function under test
      * does not raise an exception.
@@ -55,19 +67,15 @@ public class KesselAuthorizationTest {
         // Mock the security context.
         final SecurityContext mockedSecurityContext = this.mockSecurityContext();
 
-        // Enable the Kessel back end integration for this test.
-        Mockito.when(this.backendConfig.isKesselRelationsEnabled()).thenReturn(true);
-
         // Simulate that Kessel returns a positive response.
-        final CheckResponse positiveCheckResponse = CheckResponse.newBuilder().setAllowed(CheckResponse.Allowed.ALLOWED_TRUE).build();
-        Mockito.when(this.checkClient.check(Mockito.any())).thenReturn(positiveCheckResponse);
+        this.kesselTestHelper.mockKesselPermission(DEFAULT_USER, WorkspacePermission.EVENT_LOG_VIEW, ResourceType.WORKSPACE, WORKSPACE_ID_PLACEHOLDER);
 
         // Call the function under test.
         this.kesselAuthorization.hasPermissionOnResource(
             mockedSecurityContext,
             WorkspacePermission.EVENT_LOG_VIEW,
             ResourceType.WORKSPACE,
-            "workspace-uuid"
+            WORKSPACE_ID_PLACEHOLDER
         );
 
         // Verify that we called Kessel.
@@ -83,12 +91,8 @@ public class KesselAuthorizationTest {
         // Mock the security context.
         final SecurityContext mockedSecurityContext = this.mockSecurityContext();
 
-        // Enable the Kessel back end integration for this test.
-        Mockito.when(this.backendConfig.isKesselRelationsEnabled()).thenReturn(true);
-
         // Simulate that Kessel returns a negative response.
-        final CheckResponse positiveCheckResponse = CheckResponse.newBuilder().setAllowed(CheckResponse.Allowed.ALLOWED_FALSE).build();
-        Mockito.when(this.checkClient.check(Mockito.any())).thenReturn(positiveCheckResponse);
+        this.kesselTestHelper.mockKesselPermission(DEFAULT_USER, WorkspacePermission.EVENT_LOG_VIEW, ResourceType.WORKSPACE, WORKSPACE_ID_PLACEHOLDER, CheckResponse.Allowed.ALLOWED_FALSE);
 
         // Call the function under test and expect that it throws a "Forbidden"
         // exception.
@@ -98,7 +102,7 @@ public class KesselAuthorizationTest {
                 mockedSecurityContext,
                 WorkspacePermission.EVENT_LOG_VIEW,
                 ResourceType.WORKSPACE,
-                "workspace-uuid"
+                WORKSPACE_ID_PLACEHOLDER
             ),
             "unexpected exception thrown, as with a negative response from Kessel it should throw a \"Forbidden exception\""
         );
@@ -116,26 +120,12 @@ public class KesselAuthorizationTest {
         // Mock the security context.
         final SecurityContext mockedSecurityContext = this.mockSecurityContext();
 
-        // Enable the Kessel back end integration for this test.
-        Mockito.when(this.backendConfig.isKesselRelationsEnabled()).thenReturn(true);
-
         // Simulate that Kessel returns a few resource IDs in the response.
         final UUID firstUuid = UUID.randomUUID();
-        final ObjectReference objectReferenceOne = ObjectReference.newBuilder().setId(firstUuid.toString()).build();
-        final LookupResourcesResponse lookupResourcesResponseOne = LookupResourcesResponse.newBuilder().setResource(objectReferenceOne).build();
-
         final UUID secondUuid = UUID.randomUUID();
-        final ObjectReference objectReferenceTwo = ObjectReference.newBuilder().setId(secondUuid.toString()).build();
-        final LookupResourcesResponse lookupResourcesResponseTwo = LookupResourcesResponse.newBuilder().setResource(objectReferenceTwo).build();
-
         final UUID thirdUuid = UUID.randomUUID();
-        final ObjectReference objectReferenceThree = ObjectReference.newBuilder().setId(thirdUuid.toString()).build();
-        final LookupResourcesResponse lookupResourcesResponseThree = LookupResourcesResponse.newBuilder().setResource(objectReferenceThree).build();
 
-        // Return the iterator to simulate a stream of incoming results from
-        // Kessel.
-        final List<LookupResourcesResponse> lookupResourcesResponses = List.of(lookupResourcesResponseOne, lookupResourcesResponseTwo, lookupResourcesResponseThree);
-        Mockito.when(this.lookupClient.lookupResources(Mockito.any())).thenReturn(lookupResourcesResponses.iterator());
+        this.kesselTestHelper.mockAuthorizedIntegrationsLookup(Set.of(firstUuid, secondUuid, thirdUuid));
 
         // Call the function under test.
         final Set<UUID> result = this.kesselAuthorization.lookupAuthorizedIntegrations(mockedSecurityContext, IntegrationPermission.VIEW);
